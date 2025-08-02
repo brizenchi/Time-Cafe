@@ -207,16 +207,16 @@ export interface UIInteractionHandlers {
   onRecordPlayerClick: (songId: string, songTitle: string) => Promise<void>
 }
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 
-export const useTimeCafeUIHandlers = (): UIInteractionHandlers => {
+export function useTimeCafeUIHandlers(): UIInteractionHandlers {
   const contract = useTimeCafeContract()
   
   const [isPlaying, setIsPlaying] = useState(false);
   const [timeoutId, setTimeoutId] = useState<NodeJS.Timeout | null>(null);
 
-  const onCoffeeMachineClick = async (targetPlayer?: string) => {
-    console.log("onCoffeeMachineClick")
+    const onCoffeeMachineClick = useCallback(async (targetPlayer?: string) => {
+    console.log("onCoffeeMachineClick");
     if (!targetPlayer) {
       // If no target player, just send a general message
       await contract.sendMessage({
@@ -234,9 +234,9 @@ export const useTimeCafeUIHandlers = (): UIInteractionHandlers => {
       audio.volume = 0.5 // 设置音量为50%
       audio.play().catch(console.error)
     }, 10000)
-  }
+  }, [contract])
 
-  const onPlayerClick = async (targetPlayerId: string, playerName: string) => {
+  const onPlayerClick = useCallback(async (targetPlayerId: string, playerName: string) => {
     console.log("onPlayerClick")
     const gifts = ['🎁', '🌟', '💝', '🎈', '🌺', '🍰']
     const randomGift = gifts[Math.floor(Math.random() * gifts.length)]
@@ -244,55 +244,42 @@ export const useTimeCafeUIHandlers = (): UIInteractionHandlers => {
     await contract.sendGift({
       recipient: targetPlayerId,
       giftName: randomGift,
-      message: `Hey ${playerName}! Here's a gift for you! ${randomGift}`
+      message: 'Have a nice day',
     })
-    const audio = new Audio('/cafe.wav')
-    audio.volume = 0.5 // 设置音量为50%
-    audio.play().catch(console.error)
-  }
+    setTimeout(() => {
+      const audio = new Audio('/gift.wav')
+      audio.volume = 0.5 // 设置音量为50%
+      audio.play().catch(console.error)
+    }, 10000)
+    
+  }, [contract])
 
-  const onRecordPlayerClick = async (songId: string, songTitle: string) => {
+  const onRecordPlayerClick = useCallback(async (songId: string, songTitle: string) => {
     console.log("onRecordPlayerClick");
-
-    if (isPlaying) {
-      // If a song is already playing, clear any pending play timeout and change the song immediately.
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-        setTimeoutId(null);
-      }
-      console.log("Switching song immediately");
-      await contract.changeSong({
-        songId,
-        songTitle
-      });
-    } else {
-      // If no song is playing, set a timeout to play the song after 10 seconds.
-      console.log("Waiting 10 seconds to play...");
-      const newTimeoutId = setTimeout(async () => {
-        console.log("10 seconds passed, playing song");
-        await contract.changeSong({
-          songId,
-          songTitle
-        });
-        setIsPlaying(true); // Set playing state to true after the song starts.
-        setTimeoutId(null);
-      }, 10000);
-      setTimeoutId(newTimeoutId);
-    }
-  };
-
+    await contract.changeSong({
+      songId,
+      songTitle
+    });
+    const randomIndex = Math.floor(Math.random() * songs.length);
+    const audio = new Audio(songs[randomIndex].url);
+    audio.volume = 0.5; // 设置音量为50%
+    audio.play().catch(console.error);
+   
+    
+  }, [contract]);
+ 
   const songs = [
     {
       name: 'Ed Sheeran - Perfect',
-      url: 'https://music.163.com/song?id=451703096',
+      url: '/Joy1.mp3',
     },
     {
       name: 'Taylor Swift - Lover',
-      url: 'https://music.163.com/song?id=1407551413',
+      url: '/joy2.mp3',
     },
     {
       name: 'Yiruma - River Flows in You',
-      url: 'https://music.163.com/song?id=1391634919',
+      url: '/joy3.mp3',
     },
   ];
 
