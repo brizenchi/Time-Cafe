@@ -10,6 +10,9 @@ interface GiftModalProps {
   onClose: () => void
   targetPlayer: { name: string; id: string } | null
   onSendGift: (giftType: string) => void
+  onMouseEnter?: () => void
+  onMouseLeave?: () => void
+  popoverStyle?: React.CSSProperties
 }
 
 const gifts = [
@@ -19,7 +22,7 @@ const gifts = [
   { id: "gift", name: "礼物", icon: Gift, color: "#4ecdc4", description: "神秘的礼物盒" },
 ]
 
-export function GiftModal({ isOpen, onClose, targetPlayer, onSendGift }: GiftModalProps) {
+export function GiftModal({ isOpen, onClose, targetPlayer, onSendGift, onMouseEnter, onMouseLeave, popoverStyle }: GiftModalProps) {
   const [selectedGift, setSelectedGift] = useState<string | null>(null)
 
   if (!isOpen || !targetPlayer) return null
@@ -33,7 +36,7 @@ export function GiftModal({ isOpen, onClose, targetPlayer, onSendGift }: GiftMod
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="bg-white rounded-xl shadow-lg p-2 z-50" onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} style={popoverStyle}>
       <Card className="w-full max-w-md mx-4">
         <CardHeader>
           <div className="flex items-center justify-between">

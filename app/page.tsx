@@ -10,6 +10,7 @@ import { Users, Coffee, MessageCircle } from "lucide-react"
 import { useSoundManager } from "../hooks/use-sound-manager"
 import { Volume2, VolumeX } from "lucide-react"
 import { GiftModal } from "../components/gift-modal"
+import { InteractionPopover } from "../components/interaction-popover"
 import { useEffects } from "../hooks/use-effects"
 
 interface Player {
@@ -33,7 +34,7 @@ const TILE_SIZE = 32
 const MAP_WIDTH = 25
 const MAP_HEIGHT = 15
 
-// 地图数据：0=地板，1=墙壁，2=桌子，3=椅子，4=柜台
+// Map data: 0=floor, 1=wall, 2=table, 3=chair, 4=counter
 const MAP_DATA = [
   [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
   [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
@@ -52,8 +53,46 @@ const MAP_DATA = [
   [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
 ]
 
+const songs = [
+  {
+    name: '陈奕迅 - 红玫瑰',
+    url: 'https://music.163.com/song?id=27867140',
+  },
+  {
+    name: '周杰伦 - 七里香',
+    url: 'https://music.163.com/song?id=186016',
+  },
+  {
+    name: '五月天 - 温柔',
+    url: 'https://music.163.com/song?id=167827',
+  },
+  {
+    name: 'Taylor Swift - Lover',
+    url: 'https://music.163.com/song?id=1407551413',
+  },
+  {
+    name: 'NewJeans - Super Shy',
+    url: 'https://music.163.com/song?id=2058261887',
+  },
+];
+
 export default function PixelCafe() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [songIdx, setSongIdx] = useState(0);
+  // audio 播放器引用
+  const audioRef = useRef<HTMLAudioElement>(null);
+  // 播放状态
+  const [isPlaying, setIsPlaying] = useState(false);
+
+  // 切歌后自动播放
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.load();
+      audioRef.current.play();
+      setIsPlaying(true);
+    }
+  }, [songIdx]);
+
   const [player, setPlayer] = useState<Player>({
     id: "player1",
     name: "Player",
@@ -68,6 +107,15 @@ export default function PixelCafe() {
   const [playerName, setPlayerName] = useState("Player")
   const [showNameInput, setShowNameInput] = useState(true)
 
+  // Interaction popover state
+  const [interactionPopover, setInteractionPopover] = useState<{
+    player: Player | null,
+    x: number,
+    y: number,
+    open: boolean
+  }>({ player: null, x: 0, y: 0, open: false })
+
+  // 保留弹窗送礼相关状态（如需使用 GiftModal）
   const [showGiftModal, setShowGiftModal] = useState(false)
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null)
   const [giftNotifications, setGiftNotifications] = useState<
@@ -81,61 +129,88 @@ export default function PixelCafe() {
   const soundManager = useSoundManager()
   const effectsManager = useEffects()
 
-  // 点击检测
+  // 点击检测（送礼&烟花）
+  const coffeeRef = useRef<HTMLAudioElement>(null);
+
   const handleCanvasClick = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
-      const canvas = canvasRef.current
-      if (!canvas) return
+      const canvas = canvasRef.current;
+      if (!canvas) return;
 
-      const rect = canvas.getBoundingClientRect()
-      const clickX = e.clientX - rect.left
-      const clickY = e.clientY - rect.top
+      const rect = canvas.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const clickY = e.clientY - rect.top;
+
+      // 咖啡机区域检测（与 render 里的 coffeeX/coffeeY 保持一致）
+      const coffeeX = Math.floor(MAP_WIDTH / 3 - 1) * TILE_SIZE;
+      const coffeeY = Math.floor(MAP_HEIGHT / 3 - 1) * TILE_SIZE;
+      if (
+        clickX >= coffeeX &&
+        clickX <= coffeeX + TILE_SIZE * 2 &&
+        clickY >= coffeeY &&
+        clickY <= coffeeY + TILE_SIZE * 2
+      ) {
+        // 播放咖啡音效
+        if (coffeeRef.current) {
+          coffeeRef.current.currentTime = 0;
+          coffeeRef.current.play();
+        }
+        return;
+      }
 
       // 转换为游戏坐标
-      const gameX = Math.floor(clickX / TILE_SIZE)
-      const gameY = Math.floor(clickY / TILE_SIZE)
+      const gameX = Math.floor(clickX / TILE_SIZE);
+      const gameY = Math.floor(clickY / TILE_SIZE);
 
       // 检查是否点击了自己
       if (gameX === player.x && gameY === player.y) {
         // 放烟花
-        effectsManager.createFirework(clickX, clickY)
-        soundManager.playFirework()
-        return
+        effectsManager.createFirework(clickX, clickY);
+        soundManager.playFirework();
+        return;
       }
-
       // 检查是否点击了其他玩家
-      const clickedPlayer = otherPlayers.find((p) => p.x === gameX && p.y === gameY)
+      const clickedPlayer = otherPlayers.find((p) => p.x === gameX && p.y === gameY);
       if (clickedPlayer) {
-        setSelectedPlayer(clickedPlayer)
-        setShowGiftModal(true)
-        soundManager.playButtonClick()
+        // 记录弹窗目标和像素坐标（弹窗显示在头像上方居中）
+        setInteractionPopover({
+          player: clickedPlayer,
+          x: clickedPlayer.x * TILE_SIZE + TILE_SIZE / 2 - 60, // popover宽度居中
+          y: clickedPlayer.y * TILE_SIZE - 60, // 头像正上方
+          open: true
+        });
+        soundManager.playButtonClick();
+        return;
       }
+      // 点击空白，关闭弹窗
+      setInteractionPopover({ player: null, x: 0, y: 0, open: false });
     },
     [player, otherPlayers, effectsManager, soundManager],
-  )
+  );
 
   // 发送礼物
   const handleSendGift = useCallback(
     (giftType: string) => {
-      const fromX = player.x * TILE_SIZE + TILE_SIZE / 2
-      const fromY = player.y * TILE_SIZE + TILE_SIZE / 2
-      const toX = selectedPlayer!.x * TILE_SIZE + TILE_SIZE / 2
-      const toY = selectedPlayer!.y * TILE_SIZE + TILE_SIZE / 2
+      if (!selectedPlayer) return;
+      const fromX = player.x * TILE_SIZE + TILE_SIZE / 2;
+      const fromY = player.y * TILE_SIZE + TILE_SIZE / 2;
+      const toX = selectedPlayer.x * TILE_SIZE + TILE_SIZE / 2;
+      const toY = selectedPlayer.y * TILE_SIZE + TILE_SIZE / 2;
 
-      effectsManager.createGiftEffect(fromX, fromY, toX, toY, giftType)
-      soundManager.playGiftSend()
+      effectsManager.createGiftEffect(fromX, fromY, toX, toY, giftType);
+      soundManager.playGiftSend();
 
-      // 添加礼物通知
+      // Gift names for notifications
       const giftNames = {
-        coffee: "咖啡",
-        flower: "鲜花",
-        cake: "蛋糕",
-        gift: "礼物",
-      }
+        coffee: "Coffee",
+        flower: "Flower",
+        cake: "Cake",
+        gift: "Gift",
+      };
 
       const notification = {
         id: Date.now().toString(),
-        message: `${player.name} 送给 ${selectedPlayer!.name} 一个${giftNames[giftType as keyof typeof giftNames]}！`,
+        message: `${player.name} sent ${selectedPlayer.name} a ${giftNames[giftType as keyof typeof giftNames]}!`,
         timestamp: Date.now(),
       }
 
@@ -180,35 +255,54 @@ export default function PixelCafe() {
 
   // 绘制像素小人
   const drawPlayer = useCallback((ctx: CanvasRenderingContext2D, p: Player) => {
-    const pixelX = p.x * TILE_SIZE
-    const pixelY = p.y * TILE_SIZE
-
-    // 身体
-    ctx.fillStyle = p.color
-    ctx.fillRect(pixelX + 8, pixelY + 12, 16, 16)
-
-    // 头部
-    ctx.fillStyle = "#fdbcb4"
-    ctx.fillRect(pixelX + 10, pixelY + 4, 12, 12)
-
-    // 眼睛
-    ctx.fillStyle = "#000"
-    ctx.fillRect(pixelX + 12, pixelY + 7, 2, 2)
-    ctx.fillRect(pixelX + 18, pixelY + 7, 2, 2)
-
-    // 腿部
-    ctx.fillStyle = "#4a4a4a"
-    ctx.fillRect(pixelX + 10, pixelY + 24, 4, 6)
-    ctx.fillRect(pixelX + 18, pixelY + 24, 4, 6)
-
-    // 名字标签
-    ctx.fillStyle = "rgba(0, 0, 0, 0.7)"
-    ctx.fillRect(pixelX + 2, pixelY - 8, 28, 10)
-    ctx.fillStyle = "#fff"
-    ctx.font = "8px monospace"
-    ctx.textAlign = "center"
-    ctx.fillText(p.name, pixelX + 16, pixelY - 1)
-  }, [])
+    ctx.save();
+    ctx.translate(p.x * TILE_SIZE, p.y * TILE_SIZE);
+    // 判断是否为本地玩家
+    if (p.id === player.id) {
+      // 画头像图片
+      const img = new window.Image();
+      img.src = '/p1.png';
+      // 立即画可能会失败，需监听加载
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, TILE_SIZE, TILE_SIZE);
+        // 绘制名字
+        ctx.font = "8px monospace";
+        ctx.textAlign = "center";
+        ctx.fillStyle = "rgba(0,0,0,0.7)";
+        ctx.fillRect(-2, -14, 36, 12);
+        ctx.fillStyle = "#fff";
+        ctx.fillText(p.name, 16, -4);
+      };
+      // 兜底：如已加载直接画
+      if (img.complete) {
+        ctx.drawImage(img, 0, 0, TILE_SIZE, TILE_SIZE);
+        ctx.font = "8px monospace";
+        ctx.textAlign = "center";
+        ctx.fillStyle = "rgba(0,0,0,0.7)";
+        ctx.fillRect(-2, -14, 36, 12);
+        ctx.fillStyle = "#fff";
+        ctx.fillText(p.name, 16, -4);
+      }
+    } else {
+      // 其他玩家仍用像素风格
+      ctx.fillStyle = p.color;
+      ctx.fillRect(8, 8, 16, 16);
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(14, 14, 4, 4);
+      ctx.fillStyle = "#333";
+      if (p.direction === "up") ctx.fillRect(15, 6, 2, 6);
+      if (p.direction === "down") ctx.fillRect(15, 20, 2, 6);
+      if (p.direction === "left") ctx.fillRect(6, 15, 6, 2);
+      if (p.direction === "right") ctx.fillRect(20, 15, 6, 2);
+      ctx.font = "8px monospace";
+      ctx.textAlign = "center";
+      ctx.fillStyle = "rgba(0,0,0,0.7)";
+      ctx.fillRect(-2, -14, 36, 12);
+      ctx.fillStyle = "#fff";
+      ctx.fillText(p.name, 16, -4);
+    }
+    ctx.restore();
+  }, [player.id])
 
   // 绘制地图
   const drawMap = useCallback((ctx: CanvasRenderingContext2D) => {
@@ -279,6 +373,15 @@ export default function PixelCafe() {
     // 绘制地图
     drawMap(ctx)
 
+    // 绘制咖啡机（居中，占4格）
+    const coffeeImg = new window.Image()
+    coffeeImg.src = '/coffeemachine.png'
+    // 居中坐标（地图中央4格）
+    const coffeeX = Math.floor(MAP_WIDTH / 3 - 1) * TILE_SIZE
+    const coffeeY = Math.floor(MAP_HEIGHT / 3 - 1) * TILE_SIZE
+    ctx.drawImage(coffeeImg, coffeeX, coffeeY, TILE_SIZE * 2, TILE_SIZE * 2)
+
+
     // 绘制所有玩家
     otherPlayers.forEach((p) => drawPlayer(ctx, p))
     drawPlayer(ctx, player)
@@ -298,26 +401,18 @@ export default function PixelCafe() {
 
       switch (e.key) {
         case "ArrowUp":
-        case "w":
-        case "W":
           newY -= 1
           newDirection = "up"
           break
         case "ArrowDown":
-        case "s":
-        case "S":
           newY += 1
           newDirection = "down"
           break
         case "ArrowLeft":
-        case "a":
-        case "A":
           newX -= 1
           newDirection = "left"
           break
         case "ArrowRight":
-        case "d":
-        case "D":
           newX += 1
           newDirection = "right"
           break
@@ -380,18 +475,18 @@ export default function PixelCafe() {
       <div className="min-h-screen bg-gradient-to-br from-amber-100 to-orange-200 flex items-center justify-center p-4">
         <Card className="w-full max-w-md">
           <CardHeader>
-            <CardTitle className="text-center flex items-center gap-2 justify-center">
-              <Coffee className="w-6 h-6" />
-              欢迎来到像素咖啡馆
-            </CardTitle>
+              <CardTitle className="text-center flex items-center gap-2 justify-center font-['-apple-system','BlinkMacSystemFont','Segoe\ UI','Roboto','Helvetica\ Neue',Arial,sans-serif]">
+                <Coffee className="w-6 h-6" />
+                Welcome to Time Cafe
+              </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <label className="block text-sm font-medium mb-2">请输入你的名字：</label>
+              <label className="block text-sm font-medium mb-2 font-['-apple-system','BlinkMacSystemFont','Segoe\ UI','Roboto','Helvetica\ Neue',Arial,sans-serif]">Enter your name:</label>
               <Input
                 value={playerName}
                 onChange={(e) => setPlayerName(e.target.value)}
-                placeholder="输入你的名字"
+                placeholder="Enter your name"
                 onKeyPress={(e) => e.key === "Enter" && setName()}
                 maxLength={10}
               />
@@ -404,9 +499,9 @@ export default function PixelCafe() {
               className="w-full"
               disabled={!playerName.trim()}
             >
-              进入咖啡馆
+              Enter Cafe
             </Button>
-            <div className="text-sm text-muted-foreground text-center">使用 WASD 或方向键移动</div>
+            <div className="text-sm text-muted-foreground text-center font-['-apple-system','BlinkMacSystemFont','Segoe\ UI','Roboto','Helvetica\ Neue',Arial,sans-serif]">Use arrow keys to move</div>
           </CardContent>
         </Card>
       </div>
@@ -422,7 +517,7 @@ export default function PixelCafe() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Coffee className="w-5 h-5" />
-                像素咖啡馆
+Time Cafe
                 <div className="ml-auto flex items-center gap-4">
                   <Button
                     variant="ghost"
@@ -434,28 +529,101 @@ export default function PixelCafe() {
                     className="flex items-center gap-1"
                   >
                     {soundManager.soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-                    {soundManager.soundEnabled ? "音效开" : "音效关"}
+                    {soundManager.soundEnabled ? "Sound On" : "Sound Off"}
                   </Button>
                   <div className="flex items-center gap-2 text-sm">
                     <Users className="w-4 h-4" />
-                    {otherPlayers.length + 1} 在线
+                    {otherPlayers.length + 1} Online
                   </div>
+                  <button
+                    style={{
+                      position: 'relative',
+                      top: 2,
+                      padding: '4px 8px',
+                      borderRadius: 8,
+                      background: 'linear-gradient(90deg, #ffe082 0%, #ffb300 100%)',
+                      color: '#222',
+                      fontWeight: 700,
+                      border: 'none',
+                      boxShadow: '0 2px 8px #0003',
+                      cursor: 'pointer',
+                      fontSize: 14
+                    }}
+                    onClick={() => {
+  const url = window.location.origin + window.location.pathname;
+  navigator.clipboard.writeText(url);
+  alert('Link copyed!');
+}}
+                  >
+                    Share the link to invite your friends!
+                  </button>
                 </div>
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="flex justify-center">
-                <canvas
-                  ref={canvasRef}
-                  width={MAP_WIDTH * TILE_SIZE}
-                  height={MAP_HEIGHT * TILE_SIZE}
-                  className="border-2 border-amber-300 rounded-lg bg-amber-50 cursor-pointer"
-                  style={{ imageRendering: "pixelated" }}
-                  onClick={handleCanvasClick}
-                />
+                <div style={{ position: 'relative', width: MAP_WIDTH * TILE_SIZE, height: MAP_HEIGHT * TILE_SIZE }}>
+                  <audio ref={coffeeRef} src="/cafe.wav" preload="auto" style={{ display: 'none' }} />
+                  <canvas
+                    ref={canvasRef}
+                    width={MAP_WIDTH * TILE_SIZE}
+                    height={MAP_HEIGHT * TILE_SIZE}
+                    className="border-2 border-amber-300 rounded-lg bg-amber-50 cursor-pointer"
+                    style={{ imageRendering: "pixelated", position: 'absolute', left: 0, top: 0 }}
+                    onClick={handleCanvasClick}
+                  />
+                  {interactionPopover.open && interactionPopover.player && (
+                    <InteractionPopover
+                      player={interactionPopover.player}
+                      x={interactionPopover.x}
+                      y={interactionPopover.y}
+                      onSendGift={() => {
+                        setSelectedPlayer(interactionPopover.player!)
+                        setShowGiftModal(true)
+                        setInteractionPopover({ player: null, x: 0, y: 0, open: false })
+                      }}
+                      onBuyCoffee={() => {
+                        // 这里可以扩展“请喝咖啡”逻辑
+                        alert(`You bought coffee for ${interactionPopover.player!.name}!`)
+                        setInteractionPopover({ player: null, x: 0, y: 0, open: false })
+                      }}
+                      onClose={() => setInteractionPopover({ player: null, x: 0, y: 0, open: false })}
+                    />
+                  )}
+                </div>
               </div>
               <div className="mt-4 text-center text-sm text-muted-foreground">
-                使用 WASD 或方向键移动 • 点击自己放烟花 • 点击其他玩家送礼物
+Use arrow keys to move • Click yourself for fireworks • Click other players to send gifts
+              </div>
+              {/* 底部送礼物列表 */}
+              <div style={{
+                position: 'fixed',
+                left: 0,
+                bottom: 0,
+                width: '100vw',
+                background: 'rgba(255,255,255,0.92)',
+                borderTop: '1px solid #f5deb3',
+                boxShadow: '0 -2px 12px rgba(0,0,0,0.07)',
+                zIndex: 300,
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                padding: '8px 0',
+                gap: 18
+              }}>
+                <span style={{ fontWeight: 500, color: '#b07d33', fontSize: 17, marginRight: 10, letterSpacing: 0.5 }}>Gift list</span>
+                <button style={{ fontSize: 28, background: 'none', border: 'none', cursor: 'pointer', margin: '0 10px' }} title="Send Croissant" aria-label="Send Croissant"
+                  onClick={() => setChatMessages(msgs => [...msgs, { id: Date.now().toString() + Math.random(), playerId: player.id, playerName: player.name, message: '🥐 +1', timestamp: Date.now() }])}
+                >🥐</button>
+                <button style={{ fontSize: 28, background: 'none', border: 'none', cursor: 'pointer', margin: '0 10px' }} title="Send Flower" aria-label="Send Flower"
+                  onClick={() => setChatMessages(msgs => [...msgs, { id: Date.now().toString() + Math.random(), playerId: player.id, playerName: player.name, message: '💐 +1', timestamp: Date.now() }])}
+                >💐</button>
+                <button style={{ fontSize: 28, background: 'none', border: 'none', cursor: 'pointer', margin: '0 10px' }} title="Send Money" aria-label="Send Money"
+                  onClick={() => setChatMessages(msgs => [...msgs, { id: Date.now().toString() + Math.random(), playerId: player.id, playerName: player.name, message: '💸 +1', timestamp: Date.now() }])}
+                >💸</button>
+                <button style={{ fontSize: 28, background: 'none', border: 'none', cursor: 'pointer', margin: '0 10px' }} title="Send Coffee" aria-label="Send Coffee"
+                  onClick={() => setChatMessages(msgs => [...msgs, { id: Date.now().toString() + Math.random(), playerId: player.id, playerName: player.name, message: '☕️ +1', timestamp: Date.now() }])}
+                >☕️</button>
               </div>
               {giftNotifications.length > 0 && (
                 <div className="mt-2 space-y-1">
@@ -469,6 +637,44 @@ export default function PixelCafe() {
                   ))}
                 </div>
               )}
+              {/* 歌曲播放器 */}
+              <button
+                style={{
+                  position: 'absolute',
+                  left: (MAP_WIDTH - 5) * TILE_SIZE,
+                  top: (MAP_HEIGHT - 5) * TILE_SIZE,
+                  width: TILE_SIZE * 2,
+                  height: TILE_SIZE * 2,
+                  zIndex: 400,
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  cursor: 'pointer',
+                }}
+                aria-label="切歌"
+                title={`切歌：${songs[songIdx].name}`}
+                onClick={() => {
+                  const nextIdx = (songIdx + 1) % songs.length;
+                  setSongIdx(nextIdx);
+                  // 自动播放
+                  setTimeout(() => {
+                    if (audioRef.current) {
+                      audioRef.current.load();
+                      audioRef.current.play();
+                    }
+                  }, 0);
+                }}
+              >
+                <img src="/music.png" alt="切歌" style={{ width: '100%', height: '100%', pointerEvents: 'none' }} />
+              </button>
+              {/* 隐藏的 audio 播放器，仅用于播放 */}
+              <audio
+                ref={audioRef}
+                src={songs[songIdx].url.replace('music.163.com/song','music.163.com/song/media/outer/url') + '.mp3'}
+                controls={false}
+                onEnded={() => setIsPlaying(false)}
+                style={{ display: 'none' }}
+              />
             </CardContent>
           </Card>
         </div>
@@ -479,13 +685,13 @@ export default function PixelCafe() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
                 <MessageCircle className="w-5 h-5" />
-                聊天室
+Chat Room
               </CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col h-96">
               <div className="flex-1 overflow-y-auto space-y-2 mb-4">
                 {chatMessages.length === 0 ? (
-                  <div className="text-center text-muted-foreground text-sm">还没有消息，开始聊天吧！</div>
+                  <div className="text-center text-muted-foreground text-sm font-['-apple-system','BlinkMacSystemFont','Segoe\ UI','Roboto','Helvetica\ Neue',Arial,sans-serif]">No messages yet, start chatting!</div>
                 ) : (
                   chatMessages.map((msg) => (
                     <div key={msg.id} className="text-sm">
@@ -504,7 +710,7 @@ export default function PixelCafe() {
                 <Input
                   value={newMessage}
                   onChange={(e) => setNewMessage(e.target.value)}
-                  placeholder="输入消息..."
+                  placeholder="Type a message..."
                   onKeyPress={(e) => e.key === "Enter" && sendMessage()}
                   maxLength={100}
                 />
@@ -515,22 +721,13 @@ export default function PixelCafe() {
                   }}
                   size="sm"
                 >
-                  发送
+  Send
                 </Button>
               </div>
             </CardContent>
           </Card>
         </div>
       </div>
-      <GiftModal
-        isOpen={showGiftModal}
-        onClose={() => {
-          setShowGiftModal(false)
-          setSelectedPlayer(null)
-        }}
-        targetPlayer={selectedPlayer}
-        onSendGift={handleSendGift}
-      />
     </div>
   )
 }

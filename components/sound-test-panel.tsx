@@ -14,6 +14,7 @@ export function SoundTestPanel() {
     { name: "按钮点击", action: soundManager.playButtonClick },
     { name: "进入咖啡馆", action: soundManager.playEnterCafe },
     { name: "错误音效", action: soundManager.playError },
+    { name: "送礼音效", action: soundManager.playGiftSend },
   ]
 
   return (

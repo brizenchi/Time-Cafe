@@ -1,0 +1,7 @@
+{
+    "installMethod": "npm",
+    "autoUpdates": false,
+    "hasCompletedOnboarding": true,
+    "telemetry": false,
+    "customApiUrl": "https://api.moonshot.cn/anthropic"
+}
