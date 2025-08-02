@@ -23,7 +23,7 @@ export interface GameEvent {
 const STORAGE_KEY = "pixel-cafe-players"
 const EVENTS_KEY = "pixel-cafe-events"
 const CLEANUP_INTERVAL = 600000 // 60秒清理一次离线玩家
-const UPDATE_INTERVAL = 50 // 50ms更新频率，更流畅
+const UPDATE_INTERVAL = 500 // 50ms更新频率，更流畅
 
 export function useLocalMultiplayer(currentPlayer: Player) {
   const [otherPlayers, setOtherPlayers] = useState<Player[]>([])

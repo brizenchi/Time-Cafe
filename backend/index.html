@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Chat</title>
+    <style>
+        body { font-family: sans-serif; }
+        #messages { list-style-type: none; margin: 0; padding: 0; height: 300px; border: 1px solid #ccc; overflow-y: scroll; }
+        #messages li { padding: 8px 12px; }
+        #messages li:nth-child(odd) { background: #f2f2f2; }
+        #form { display: flex; }
+        #input { border: 1px solid #ccc; padding: 10px; flex-grow: 1; }
+        button { background: #007bff; color: white; border: none; padding: 10px; }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Chat Room</h1>
+    <ul id="messages"></ul>
+    <form id="form" action="">
+        <input id="input" autocomplete="off" /><button>Send</button>
+    </form>
+    <script>
+        const ws = new WebSocket("ws://localhost:8765");
+        const messages = document.getElementById('messages');
+        const form = document.getElementById('form');
+        const input = document.getElementById('input');
+
+        ws.onmessage = function (event) {
+            const message = document.createElement('li');
+            message.textContent = event.data;
+            messages.appendChild(message);
+            window.scrollTo(0, document.body.scrollHeight);
+        };
+
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            if (input.value) {
+                ws.send(input.value);
+                // Also display the sent message locally
+                const message = document.createElement('li');
+                message.textContent = `You: ${input.value}`;
+                message.style.textAlign = 'right';
+                message.style.color = '#007bff';
+                messages.appendChild(message);
+                window.scrollTo(0, document.body.scrollHeight);
+                input.value = '';
+            }
+        });
+    </script>
+</body>
+</html>

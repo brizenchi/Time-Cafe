@@ -7,8 +7,11 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Users, Coffee, MessageCircle, Sparkles } from "lucide-react"
 import { useLocalMultiplayer, type Player } from "../hooks/use-local-multiplayer"
+import { useAccount, useConnect, useDisconnect } from 'wagmi'
+import { injected } from 'wagmi/connectors'
 import { useEffects } from "../hooks/use-effects"
 import { DebugPanel } from "../components/debug-panel"
+import { useTimeCafeContract, useTimeCafeUIHandlers } from "../hooks/use-time-cafe-contract"
 
 type DisplayMessage = {
   id: string
@@ -68,6 +71,22 @@ const generateStartPosition = () => {
   return validPositions[Math.floor(Math.random() * validPositions.length)] || { x: 3, y: 3 }
 }
 
+function ConnectWallet() {
+  const { address, isConnected } = useAccount()
+  const { connect } = useConnect()
+  const { disconnect } = useDisconnect()
+
+  if (isConnected) {
+    return (
+      <div>
+        <p>Connected: {address?.slice(0, 6)}...{address?.slice(-4)}</p>
+        <Button onClick={() => disconnect()}>Disconnect</Button>
+      </div>
+    )
+  }
+  return <Button onClick={() => connect({ connector: injected() })}>Connect Wallet</Button>
+}
+
 export default function PixelCafe() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const startPosition = generateStartPosition()
@@ -90,6 +109,11 @@ export default function PixelCafe() {
 
   const { otherPlayers, gameEvents, updateCurrentPlayer, sendGameEvent } = useLocalMultiplayer(player)
   const effectsManager = useEffects()
+  const { address, isConnected } = useAccount()
+  
+  // Contract integration
+  const contract = useTimeCafeContract()
+  const { onCoffeeMachineClick, onPlayerClick, onRecordPlayerClick } = useTimeCafeUIHandlers()
 
   // 处理游戏事件
   useEffect(() => {
@@ -109,6 +133,21 @@ export default function PixelCafe() {
             event.data.toY,
             event.data.giftType,
           )
+          // 触发智能合约调用 - 送礼物
+          if (isConnected && address && event.playerId === player.id) {
+            // 发送普通礼物到主合约
+            // contract.sendGift({
+            //   recipient: event.data.toPlayerId || address, // 使用目标玩家地址
+            //   giftName: event.data.giftType,
+            //   message: `${event.data.fromName} 送给你一个礼物！`
+            // }).catch(console.error)
+            
+            // 同时铸造礼物NFT
+            contract.sendGiftNFT({
+              recipient: event.data.toPlayerId || address,
+              message: `${event.data.fromName} 送给你一个${event.data.giftType}礼物NFT！`
+            }).catch(console.error)
+          }
           // 添加礼物通知
           const giftNames = { coffee: "咖啡", flower: "鲜花", cake: "蛋糕", gift: "礼物" }
           const notification: DisplayMessage = {
@@ -120,6 +159,10 @@ export default function PixelCafe() {
           setDisplayMessages((prev) => [...prev.slice(-49), notification])
           break
         case "chat":
+          // 触发智能合约调用 - 发送消息
+          if (isConnected && address && event.playerId === player.id) {
+            contract.sendMessage({ messageContent: event.data.message }).catch(console.error)
+          }
           const chatMessage: DisplayMessage = {
             id: event.id,
             type: "chat",
@@ -131,6 +174,13 @@ export default function PixelCafe() {
           setDisplayMessages((prev) => [...prev.slice(-49), chatMessage])
           break
         case "buy_coffee":
+          // 触发智能合约调用 - 买咖啡
+          if (isConnected && address && event.playerId === player.id) {
+            contract.buyCoffee({
+              recipient: address, // 给自己买咖啡
+              message: `${event.data.playerName} 买了杯咖啡！☕`
+            }).catch(console.error)
+          }
           const coffeeNotification: DisplayMessage = {
             id: event.id,
             type: "notification",
@@ -140,6 +190,15 @@ export default function PixelCafe() {
           setDisplayMessages((prev) => [...prev.slice(-49), coffeeNotification])
           break
         case "change_song":
+          // 触发智能合约调用 - 切歌
+          if (isConnected && address && event.playerId === player.id) {
+            const songId = `song_${Date.now()}`
+            const songTitle = `${event.data.playerName}的歌曲`
+            contract.changeSong({
+              songId,
+              songTitle
+            }).catch(console.error)
+          }
           const songNotification: DisplayMessage = {
             id: event.id,
             type: "notification",
@@ -166,6 +225,15 @@ export default function PixelCafe() {
     });
   }, [gameEvents, effectsManager, processedEventIds])
 
+  useEffect(() => {
+    if (isConnected && address) {
+      const newName = `${address.slice(0, 6)}...${address.slice(-4)}`
+      setPlayerName(newName)
+      setPlayer(prev => ({ ...prev, name: newName }))
+      setShowNameInput(false)
+    }
+  }, [isConnected, address])
+
   // 点击检测
   const handleCanvasClick = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -183,13 +251,21 @@ export default function PixelCafe() {
 
       // 检查对象交互
       if (clickedTile === 5) {
-        // 咖啡机
+        // 咖啡机 - 触发区块链交易
+        if (isConnected && address) {
+          onCoffeeMachineClick().catch(console.error)
+        }
         sendGameEvent("buy_coffee", { playerName: player.name })
         effectsManager.createFirework(clickX, clickY, "#6f4e37") // 咖啡色烟花
         return
       }
       if (clickedTile === 6) {
-        // 收音机
+        // 收音机 - 触发区块链交易
+        if (isConnected && address) {
+          const songId = `song_${Date.now()}`
+          const songTitle = `新歌曲 ${new Date().toLocaleTimeString()}`
+          onRecordPlayerClick(songId, songTitle).catch(console.error)
+        }
         sendGameEvent("change_song", { playerName: player.name })
         effectsManager.createFirework(clickX, clickY, "#888888") // 银色音符烟花
         return
@@ -206,6 +282,11 @@ export default function PixelCafe() {
 
         const giftTypes = ["coffee", "flower", "cake", "gift"]
         const randomGift = giftTypes[Math.floor(Math.random() * giftTypes.length)]
+
+        // 触发区块链交易 - 送礼物
+        if (isConnected && address) {
+          onPlayerClick(clickedPlayer.id, clickedPlayer.name).catch(console.error)
+        }
 
         effectsManager.createGiftEffect(fromX, fromY, toX, toY, randomGift)
         sendGameEvent("gift", {
@@ -460,6 +541,11 @@ export default function PixelCafe() {
       message: newMessage.trim(),
     }
 
+    // 触发区块链交易 - 发送消息
+    if (isConnected && address) {
+      contract.sendMessage({ messageContent: newMessage.trim() }).catch(console.error)
+    }
+
     sendGameEvent("chat", message)
 
     // 也添加到本地聊天
@@ -528,16 +614,13 @@ export default function PixelCafe() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Coffee className="w-5 h-5" />
-                像素咖啡馆
+                Time Ca
                 <div className="ml-auto flex items-center gap-4">
-                  <div className="flex items-center gap-2 text-sm">
-                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                    <span>实时同步</span>
-                  </div>
                   <div className="flex items-center gap-2 text-sm">
                     <Users className="w-4 h-4" />
                     {otherPlayers.length + 1} 在线
                   </div>
+                  <ConnectWallet />
                 </div>
               </CardTitle>
             </CardHeader>
