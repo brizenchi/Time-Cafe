@@ -1,48 +1,45 @@
 "use client"
 
 import type React from "react"
-
 import { useEffect, useRef, useState, useCallback } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Users, Coffee, MessageCircle } from "lucide-react"
-import { useSoundManager } from "../hooks/use-sound-manager"
-import { Volume2, VolumeX } from "lucide-react"
-import { GiftModal } from "../components/gift-modal"
+import { Users, Coffee, MessageCircle, Sparkles } from "lucide-react"
+import { useLocalMultiplayer, type Player } from "../hooks/use-local-multiplayer"
 import { useEffects } from "../hooks/use-effects"
+import { DebugPanel } from "../components/debug-panel"
 
-interface Player {
+type DisplayMessage = {
   id: string
-  name: string
-  x: number
-  y: number
-  color: string
-  direction: "up" | "down" | "left" | "right"
-}
-
-interface ChatMessage {
-  id: string
-  playerId: string
-  playerName: string
-  message: string
   timestamp: number
-}
+} & (
+  | {
+      type: "chat"
+      playerId: string
+      playerName: string
+      message: string
+    }
+  | {
+      type: "notification"
+      message: string
+    }
+)
 
 const TILE_SIZE = 32
 const MAP_WIDTH = 25
 const MAP_HEIGHT = 15
 
-// 地图数据：0=地板，1=墙壁，2=桌子，3=椅子，4=柜台
+// 地图数据：0=地板，1=墙壁，2=桌子，3=椅子，4=柜台, 5=咖啡机, 6=收音机
 const MAP_DATA = [
   [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
   [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-  [1, 0, 2, 3, 0, 0, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 2, 3, 0, 0, 2, 3, 0, 0, 1],
+  [1, 0, 2, 3, 0, 6, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 2, 3, 0, 0, 2, 3, 0, 0, 1],
   [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
   [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
   [1, 0, 2, 3, 0, 0, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 2, 3, 0, 0, 2, 3, 0, 0, 1],
   [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-  [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+  [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 5, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
   [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
   [1, 0, 2, 3, 0, 0, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 3, 0, 0, 2, 3, 0, 1],
   [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
@@ -52,34 +49,122 @@ const MAP_DATA = [
   [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
 ]
 
+// 生成随机颜色
+const generatePlayerColor = () => {
+  const colors = ["#ff6b6b", "#4ecdc4", "#45b7d1", "#96ceb4", "#feca57", "#ff9ff3", "#54a0ff", "#5f27cd"]
+  return colors[Math.floor(Math.random() * colors.length)]
+}
+
+// 生成随机起始位置
+const generateStartPosition = () => {
+  const validPositions = []
+  for (let y = 1; y < MAP_HEIGHT - 1; y++) {
+    for (let x = 1; x < MAP_WIDTH - 1; x++) {
+      if (MAP_DATA[y][x] === 0) {
+        validPositions.push({ x, y })
+      }
+    }
+  }
+  return validPositions[Math.floor(Math.random() * validPositions.length)] || { x: 3, y: 3 }
+}
+
 export default function PixelCafe() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const startPosition = generateStartPosition()
+
   const [player, setPlayer] = useState<Player>({
-    id: "player1",
+    id: `player-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
     name: "Player",
-    x: 3,
-    y: 3,
-    color: "#ff6b6b",
+    ...startPosition,
+    color: generatePlayerColor(),
     direction: "down",
+    lastUpdate: Date.now(),
   })
-  const [otherPlayers, setOtherPlayers] = useState<Player[]>([])
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+
+  const [displayMessages, setDisplayMessages] = useState<DisplayMessage[]>([])
   const [newMessage, setNewMessage] = useState("")
   const [playerName, setPlayerName] = useState("Player")
   const [showNameInput, setShowNameInput] = useState(true)
 
-  const [showGiftModal, setShowGiftModal] = useState(false)
-  const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null)
-  const [giftNotifications, setGiftNotifications] = useState<
-    Array<{
-      id: string
-      message: string
-      timestamp: number
-    }>
-  >([])
+  const [processedEventIds, setProcessedEventIds] = useState(new Set<string>())
 
-  const soundManager = useSoundManager()
+  const { otherPlayers, gameEvents, updateCurrentPlayer, sendGameEvent } = useLocalMultiplayer(player)
   const effectsManager = useEffects()
+
+  // 处理游戏事件
+  useEffect(() => {
+    const newEvents = gameEvents.filter((event) => !processedEventIds.has(event.id));
+    if (newEvents.length === 0) return;
+
+    newEvents.forEach((event) => {
+      switch (event.type) {
+        case "firework":
+          effectsManager.createFirework(event.data.x, event.data.y)
+          break
+        case "gift":
+          effectsManager.createGiftEffect(
+            event.data.fromX,
+            event.data.fromY,
+            event.data.toX,
+            event.data.toY,
+            event.data.giftType,
+          )
+          // 添加礼物通知
+          const giftNames = { coffee: "咖啡", flower: "鲜花", cake: "蛋糕", gift: "礼物" }
+          const notification: DisplayMessage = {
+            id: event.id,
+            type: "notification",
+            message: `${event.data.fromName} 送给 ${event.data.toName} 一个${giftNames[event.data.giftType as keyof typeof giftNames]}！`,
+            timestamp: event.timestamp,
+          }
+          setDisplayMessages((prev) => [...prev.slice(-49), notification])
+          break
+        case "chat":
+          const chatMessage: DisplayMessage = {
+            id: event.id,
+            type: "chat",
+            playerId: event.playerId,
+            playerName: event.data.playerName,
+            message: event.data.message,
+            timestamp: event.timestamp,
+          }
+          setDisplayMessages((prev) => [...prev.slice(-49), chatMessage])
+          break
+        case "buy_coffee":
+          const coffeeNotification: DisplayMessage = {
+            id: event.id,
+            type: "notification",
+            message: `${event.data.playerName} 买了杯咖啡！☕`,
+            timestamp: event.timestamp,
+          }
+          setDisplayMessages((prev) => [...prev.slice(-49), coffeeNotification])
+          break
+        case "change_song":
+          const songNotification: DisplayMessage = {
+            id: event.id,
+            type: "notification",
+            message: `${event.data.playerName} 切歌了！🎵`,
+            timestamp: event.timestamp,
+          }
+          setDisplayMessages((prev) => [...prev.slice(-49), songNotification])
+          break
+      }
+    })
+
+    setProcessedEventIds((prevIds) => {
+      const newIds = new Set(prevIds);
+      newEvents.forEach((event) => newIds.add(event.id));
+      // Keep the set size manageable
+      const toDelete = newIds.size - 50;
+      if (toDelete > 0) {
+        const anArray = Array.from(newIds).slice(0, toDelete);
+        for (const item of anArray) {
+          newIds.delete(item);
+        }
+      }
+      return newIds;
+    });
+  }, [gameEvents, effectsManager, processedEventIds])
 
   // 点击检测
   const handleCanvasClick = useCallback(
@@ -91,97 +176,70 @@ export default function PixelCafe() {
       const clickX = e.clientX - rect.left
       const clickY = e.clientY - rect.top
 
-      // 转换为游戏坐标
       const gameX = Math.floor(clickX / TILE_SIZE)
       const gameY = Math.floor(clickY / TILE_SIZE)
 
-      // 检查是否点击了自己
-      if (gameX === player.x && gameY === player.y) {
-        // 放烟花
-        effectsManager.createFirework(clickX, clickY)
-        soundManager.playFirework()
+      const clickedTile = MAP_DATA[gameY][gameX]
+
+      // 检查对象交互
+      if (clickedTile === 5) {
+        // 咖啡机
+        sendGameEvent("buy_coffee", { playerName: player.name })
+        effectsManager.createFirework(clickX, clickY, "#6f4e37") // 咖啡色烟花
         return
       }
+      if (clickedTile === 6) {
+        // 收音机
+        sendGameEvent("change_song", { playerName: player.name })
+        effectsManager.createFirework(clickX, clickY, "#888888") // 银色音符烟花
+        return
+      }
+
 
       // 检查是否点击了其他玩家
       const clickedPlayer = otherPlayers.find((p) => p.x === gameX && p.y === gameY)
       if (clickedPlayer) {
-        setSelectedPlayer(clickedPlayer)
-        setShowGiftModal(true)
-        soundManager.playButtonClick()
+        const fromX = player.x * TILE_SIZE + TILE_SIZE / 2
+        const fromY = player.y * TILE_SIZE + TILE_SIZE / 2
+        const toX = clickedPlayer.x * TILE_SIZE + TILE_SIZE / 2
+        const toY = clickedPlayer.y * TILE_SIZE + TILE_SIZE / 2
+
+        const giftTypes = ["coffee", "flower", "cake", "gift"]
+        const randomGift = giftTypes[Math.floor(Math.random() * giftTypes.length)]
+
+        effectsManager.createGiftEffect(fromX, fromY, toX, toY, randomGift)
+        sendGameEvent("gift", {
+          fromX,
+          fromY,
+          toX,
+          toY,
+          giftType: randomGift,
+          fromName: player.name,
+          toName: clickedPlayer.name,
+        })
       }
     },
-    [player, otherPlayers, effectsManager, soundManager],
-  )
-
-  // 发送礼物
-  const handleSendGift = useCallback(
-    (giftType: string) => {
-      const fromX = player.x * TILE_SIZE + TILE_SIZE / 2
-      const fromY = player.y * TILE_SIZE + TILE_SIZE / 2
-      const toX = selectedPlayer!.x * TILE_SIZE + TILE_SIZE / 2
-      const toY = selectedPlayer!.y * TILE_SIZE + TILE_SIZE / 2
-
-      effectsManager.createGiftEffect(fromX, fromY, toX, toY, giftType)
-      soundManager.playGiftSend()
-
-      // 添加礼物通知
-      const giftNames = {
-        coffee: "咖啡",
-        flower: "鲜花",
-        cake: "蛋糕",
-        gift: "礼物",
-      }
-
-      const notification = {
-        id: Date.now().toString(),
-        message: `${player.name} 送给 ${selectedPlayer!.name} 一个${giftNames[giftType as keyof typeof giftNames]}！`,
-        timestamp: Date.now(),
-      }
-
-      setGiftNotifications((prev) => [...prev.slice(-4), notification])
-
-      // 3秒后播放收到礼物音效
-      setTimeout(() => {
-        soundManager.playGiftReceive()
-      }, 500)
-    },
-    [player, selectedPlayer, effectsManager, soundManager],
+    [player, otherPlayers, effectsManager, sendGameEvent],
   )
 
   // 检查位置是否可以移动
   const canMoveTo = useCallback((x: number, y: number) => {
     if (x < 0 || x >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT) return false
     const tile = MAP_DATA[y][x]
-    return tile === 0 // 只有地板可以移动
+    return tile === 0
   }, [])
 
-  // 处理移动并播放音效
-  const handleMove = useCallback(
-    (newX: number, newY: number, newDirection: string) => {
-      if (canMoveTo(newX, newY)) {
-        setPlayer((prev) => ({
-          ...prev,
-          x: newX,
-          y: newY,
-          direction: newDirection as any,
-        }))
-        soundManager.playFootstep()
-      } else {
-        setPlayer((prev) => ({
-          ...prev,
-          direction: newDirection as any,
-        }))
-        soundManager.playError()
-      }
-    },
-    [canMoveTo, soundManager],
-  )
-
   // 绘制像素小人
-  const drawPlayer = useCallback((ctx: CanvasRenderingContext2D, p: Player) => {
+  const drawPlayer = useCallback((ctx: CanvasRenderingContext2D, p: Player, isCurrentPlayer = false) => {
     const pixelX = p.x * TILE_SIZE
     const pixelY = p.y * TILE_SIZE
+
+    // 如果是当前玩家，添加光晕效果
+    if (isCurrentPlayer) {
+      ctx.save()
+      ctx.shadowColor = p.color
+      ctx.shadowBlur = 10
+    }
 
     // 身体
     ctx.fillStyle = p.color
@@ -201,6 +259,10 @@ export default function PixelCafe() {
     ctx.fillRect(pixelX + 10, pixelY + 24, 4, 6)
     ctx.fillRect(pixelX + 18, pixelY + 24, 4, 6)
 
+    if (isCurrentPlayer) {
+      ctx.restore()
+    }
+
     // 名字标签
     ctx.fillStyle = "rgba(0, 0, 0, 0.7)"
     ctx.fillRect(pixelX + 2, pixelY - 8, 28, 10)
@@ -208,6 +270,14 @@ export default function PixelCafe() {
     ctx.font = "8px monospace"
     ctx.textAlign = "center"
     ctx.fillText(p.name, pixelX + 16, pixelY - 1)
+
+    // 在线指示器
+    if (!isCurrentPlayer) {
+      ctx.fillStyle = "#00ff00"
+      ctx.beginPath()
+      ctx.arc(pixelX + 26, pixelY - 4, 2, 0, Math.PI * 2)
+      ctx.fill()
+    }
   }, [])
 
   // 绘制地图
@@ -260,6 +330,22 @@ export default function PixelCafe() {
             ctx.fillStyle = "#666"
             ctx.fillRect(pixelX + 14, pixelY + 10, 4, 8)
             break
+          case 5: // 咖啡机
+            ctx.fillStyle = "#333"
+            ctx.fillRect(pixelX + 4, pixelY + 6, 24, 24)
+            ctx.fillStyle = "#555"
+            ctx.fillRect(pixelX + 6, pixelY + 8, 20, 20)
+            ctx.fillStyle = "#00bfff"
+            ctx.fillRect(pixelX + 14, pixelY + 12, 4, 4) // 蓝光
+            break
+          case 6: // 收音机
+            ctx.fillStyle = "#8B4513"
+            ctx.fillRect(pixelX + 6, pixelY + 10, 20, 16)
+            ctx.fillStyle = "#333"
+            ctx.fillRect(pixelX + 10, pixelY + 14, 12, 8) // 喇叭
+            ctx.fillStyle = "#ccc"
+            ctx.fillRect(pixelX + 22, pixelY + 4, 2, 8) // 天线
+            break
         }
       }
     }
@@ -273,15 +359,15 @@ export default function PixelCafe() {
     const ctx = canvas.getContext("2d")
     if (!ctx) return
 
-    // 清空画布
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-    // 绘制地图
     drawMap(ctx)
 
-    // 绘制所有玩家
-    otherPlayers.forEach((p) => drawPlayer(ctx, p))
-    drawPlayer(ctx, player)
+    // 绘制其他玩家
+    otherPlayers.forEach((p) => drawPlayer(ctx, p, false))
+
+    // 绘制当前玩家（最后绘制，确保在最上层）
+    drawPlayer(ctx, player, true)
 
     // 绘制特效
     effectsManager.drawEffects(ctx)
@@ -327,53 +413,76 @@ export default function PixelCafe() {
 
       e.preventDefault()
 
-      handleMove(newX, newY, newDirection)
+      const updatedPlayer = {
+        ...player,
+        direction: newDirection,
+        ...(canMoveTo(newX, newY) ? { x: newX, y: newY } : {}),
+      }
+
+      setPlayer(updatedPlayer)
+      sendGameEvent("move", { x: updatedPlayer.x, y: updatedPlayer.y, direction: newDirection })
     }
 
     window.addEventListener("keydown", handleKeyPress)
     return () => window.removeEventListener("keydown", handleKeyPress)
-  }, [player, canMoveTo, showNameInput, handleMove])
+  }, [player, canMoveTo, showNameInput, sendGameEvent])
+
+  // 更新当前玩家到本地存储
+  useEffect(() => {
+    updateCurrentPlayer(player)
+  }, [player, updateCurrentPlayer])
 
   // 渲染循环
   useEffect(() => {
-    render()
-    effectsManager.updateEffects()
+    let animationFrameId: number
+
+    const gameLoop = () => {
+      render()
+      effectsManager.updateEffects()
+      animationFrameId = requestAnimationFrame(gameLoop)
+    }
+
+    animationFrameId = requestAnimationFrame(gameLoop)
+
+    return () => {
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId)
+      }
+    }
   }, [render, effectsManager])
 
   // 发送消息
   const sendMessage = () => {
     if (!newMessage.trim()) return
 
-    const message: ChatMessage = {
+    const message = {
+      playerName: player.name,
+      message: newMessage.trim(),
+    }
+
+    sendGameEvent("chat", message)
+
+    // 也添加到本地聊天
+    const chatMessage: DisplayMessage = {
       id: Date.now().toString(),
+      type: "chat",
       playerId: player.id,
       playerName: player.name,
       message: newMessage.trim(),
       timestamp: Date.now(),
     }
-
-    setChatMessages((prev) => [...prev.slice(-19), message])
+    setDisplayMessages((prev) => [...prev.slice(-49), chatMessage])
     setNewMessage("")
-    soundManager.playChatNotification() // 添加这行
   }
 
   // 设置玩家名字
   const setName = () => {
     if (!playerName.trim()) return
 
-    setPlayer((prev) => ({ ...prev, name: playerName.trim() }))
+    const updatedPlayer = { ...player, name: playerName.trim() }
+    setPlayer(updatedPlayer)
     setShowNameInput(false)
-    soundManager.playEnterCafe() // 添加这行
   }
-
-  // 添加一些模拟的其他玩家
-  useEffect(() => {
-    const mockPlayers: Player[] = [
-      { id: "bot1", name: "Barista", x: 12, y: 7, color: "#4ecdc4", direction: "down" },
-      { id: "bot2", name: "Customer", x: 6, y: 5, color: "#45b7d1", direction: "right" },
-    ]
-    setOtherPlayers(mockPlayers)
-  }, [])
 
   if (showNameInput) {
     return (
@@ -396,17 +505,14 @@ export default function PixelCafe() {
                 maxLength={10}
               />
             </div>
-            <Button
-              onClick={() => {
-                soundManager.playButtonClick()
-                setName()
-              }}
-              className="w-full"
-              disabled={!playerName.trim()}
-            >
+            <Button onClick={setName} className="w-full" disabled={!playerName.trim()}>
               进入咖啡馆
             </Button>
-            <div className="text-sm text-muted-foreground text-center">使用 WASD 或方向键移动</div>
+            <div className="text-sm text-muted-foreground text-center">
+              使用 WASD 或方向键移动 • 实时多人互动
+              <br />
+              <strong>测试提示：打开多个标签页，输入不同名字</strong>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -424,18 +530,10 @@ export default function PixelCafe() {
                 <Coffee className="w-5 h-5" />
                 像素咖啡馆
                 <div className="ml-auto flex items-center gap-4">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      soundManager.setSoundEnabled(!soundManager.soundEnabled)
-                      soundManager.playButtonClick()
-                    }}
-                    className="flex items-center gap-1"
-                  >
-                    {soundManager.soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-                    {soundManager.soundEnabled ? "音效开" : "音效关"}
-                  </Button>
+                  <div className="flex items-center gap-2 text-sm">
+                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                    <span>实时同步</span>
+                  </div>
                   <div className="flex items-center gap-2 text-sm">
                     <Users className="w-4 h-4" />
                     {otherPlayers.length + 1} 在线
@@ -457,18 +555,6 @@ export default function PixelCafe() {
               <div className="mt-4 text-center text-sm text-muted-foreground">
                 使用 WASD 或方向键移动 • 点击自己放烟花 • 点击其他玩家送礼物
               </div>
-              {giftNotifications.length > 0 && (
-                <div className="mt-2 space-y-1">
-                  {giftNotifications.map((notification) => (
-                    <div
-                      key={notification.id}
-                      className="text-xs text-center text-amber-700 bg-amber-100 px-2 py-1 rounded animate-pulse"
-                    >
-                      {notification.message}
-                    </div>
-                  ))}
-                </div>
-              )}
             </CardContent>
           </Card>
         </div>
@@ -482,39 +568,44 @@ export default function PixelCafe() {
                 聊天室
               </CardTitle>
             </CardHeader>
-            <CardContent className="flex flex-col h-96">
-              <div className="flex-1 overflow-y-auto space-y-2 mb-4">
-                {chatMessages.length === 0 ? (
-                  <div className="text-center text-muted-foreground text-sm">还没有消息，开始聊天吧！</div>
+            <CardContent className="flex flex-col h-[calc(80vh-70px)] p-3">
+              <div className="flex-grow overflow-y-auto space-y-2 pr-2">
+                {displayMessages.length === 0 ? (
+                  <div className="text-center text-muted-foreground text-sm pt-4">还没有消息，开始聊天吧！</div>
                 ) : (
-                  chatMessages.map((msg) => (
-                    <div key={msg.id} className="text-sm">
-                      <span
-                        className="font-semibold"
-                        style={{ color: msg.playerId === player.id ? player.color : "#666" }}
+                  displayMessages.map((msg) =>
+                    msg.type === "chat" ? (
+                      <div key={msg.id} className="text-sm">
+                        <span
+                          className="font-semibold"
+                          style={{ color: msg.playerId === player.id ? player.color : "#666" }}
+                        >
+                          {msg.playerName}:
+                        </span>
+                        <span className="ml-1 break-words">{msg.message}</span>
+                      </div>
+                    ) : (
+                      <div
+                        key={msg.id}
+                        className="text-xs text-center text-amber-700 bg-amber-100 px-2 py-1 rounded flex items-center justify-center gap-1"
                       >
-                        {msg.playerName}:
-                      </span>
-                      <span className="ml-1">{msg.message}</span>
-                    </div>
-                  ))
+                        <Sparkles className="w-3 h-3" />
+                        {msg.message}
+                      </div>
+                    ),
+                  )
                 )}
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 pt-2 border-t border-gray-200">
                 <Input
                   value={newMessage}
                   onChange={(e) => setNewMessage(e.target.value)}
                   placeholder="输入消息..."
                   onKeyPress={(e) => e.key === "Enter" && sendMessage()}
                   maxLength={100}
+                  className="flex-1"
                 />
-                <Button
-                  onClick={() => {
-                    soundManager.playButtonClick()
-                    sendMessage()
-                  }}
-                  size="sm"
-                >
+                <Button onClick={sendMessage} size="sm">
                   发送
                 </Button>
               </div>
@@ -522,15 +613,9 @@ export default function PixelCafe() {
           </Card>
         </div>
       </div>
-      <GiftModal
-        isOpen={showGiftModal}
-        onClose={() => {
-          setShowGiftModal(false)
-          setSelectedPlayer(null)
-        }}
-        targetPlayer={selectedPlayer}
-        onSendGift={handleSendGift}
-      />
+
+      {/* 调试面板 */}
+      <DebugPanel currentPlayer={player} otherPlayers={otherPlayers} gameEvents={gameEvents} />
     </div>
   )
 }
