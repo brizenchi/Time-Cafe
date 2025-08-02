@@ -207,10 +207,16 @@ export interface UIInteractionHandlers {
   onRecordPlayerClick: (songId: string, songTitle: string) => Promise<void>
 }
 
-export function useTimeCafeUIHandlers(): UIInteractionHandlers {
+import { useState } from 'react';
+
+export const useTimeCafeUIHandlers = (): UIInteractionHandlers => {
   const contract = useTimeCafeContract()
+  
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [timeoutId, setTimeoutId] = useState<NodeJS.Timeout | null>(null);
 
   const onCoffeeMachineClick = async (targetPlayer?: string) => {
+    console.log("onCoffeeMachineClick")
     if (!targetPlayer) {
       // If no target player, just send a general message
       await contract.sendMessage({
@@ -223,10 +229,15 @@ export function useTimeCafeUIHandlers(): UIInteractionHandlers {
         message: "☕ Enjoy your coffee!"
       })
     }
+    setTimeout(() => {
+      const audio = new Audio('/cafe.wav')
+      audio.volume = 0.5 // 设置音量为50%
+      audio.play().catch(console.error)
+    }, 10000)
   }
 
   const onPlayerClick = async (targetPlayerId: string, playerName: string) => {
-    // Send a gift to the clicked player
+    console.log("onPlayerClick")
     const gifts = ['🎁', '🌟', '💝', '🎈', '🌺', '🍰']
     const randomGift = gifts[Math.floor(Math.random() * gifts.length)]
     
@@ -235,15 +246,55 @@ export function useTimeCafeUIHandlers(): UIInteractionHandlers {
       giftName: randomGift,
       message: `Hey ${playerName}! Here's a gift for you! ${randomGift}`
     })
+    const audio = new Audio('/cafe.wav')
+    audio.volume = 0.5 // 设置音量为50%
+    audio.play().catch(console.error)
   }
 
   const onRecordPlayerClick = async (songId: string, songTitle: string) => {
-    // Change the current song
-    await contract.changeSong({
-      songId,
-      songTitle
-    })
-  }
+    console.log("onRecordPlayerClick");
+
+    if (isPlaying) {
+      // If a song is already playing, clear any pending play timeout and change the song immediately.
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        setTimeoutId(null);
+      }
+      console.log("Switching song immediately");
+      await contract.changeSong({
+        songId,
+        songTitle
+      });
+    } else {
+      // If no song is playing, set a timeout to play the song after 10 seconds.
+      console.log("Waiting 10 seconds to play...");
+      const newTimeoutId = setTimeout(async () => {
+        console.log("10 seconds passed, playing song");
+        await contract.changeSong({
+          songId,
+          songTitle
+        });
+        setIsPlaying(true); // Set playing state to true after the song starts.
+        setTimeoutId(null);
+      }, 10000);
+      setTimeoutId(newTimeoutId);
+    }
+  };
+
+  const songs = [
+    {
+      name: 'Ed Sheeran - Perfect',
+      url: 'https://music.163.com/song?id=451703096',
+    },
+    {
+      name: 'Taylor Swift - Lover',
+      url: 'https://music.163.com/song?id=1407551413',
+    },
+    {
+      name: 'Yiruma - River Flows in You',
+      url: 'https://music.163.com/song?id=1391634919',
+    },
+  ];
 
   return {
     onCoffeeMachineClick,

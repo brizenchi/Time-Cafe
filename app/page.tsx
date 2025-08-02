@@ -37,13 +37,13 @@ const MAP_HEIGHT = 15
 const MAP_DATA = [
   [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
   [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-  [1, 0, 2, 3, 0, 6, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 2, 3, 0, 0, 2, 3, 0, 0, 1],
-  [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+  [1, 0, 2, 3, 0, 6, 7, 3, 0, 0, 0, 0, 0, 0, 0, 0, 2, 3, 0, 0, 2, 3, 0, 0, 1],
+  [1, 0, 0, 0, 0, 7, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
   [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
   [1, 0, 2, 3, 0, 0, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 2, 3, 0, 0, 2, 3, 0, 0, 1],
   [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-  [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 5, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-  [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+  [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 5, 7, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+  [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 7, 7, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
   [1, 0, 2, 3, 0, 0, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 3, 0, 0, 2, 3, 0, 1],
   [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
   [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
@@ -101,6 +101,8 @@ export default function PixelCafe() {
   })
 
   const [displayMessages, setDisplayMessages] = useState<DisplayMessage[]>([])
+  const [coffeeMachineImage, setCoffeeMachineImage] = useState<HTMLImageElement | null>(null)
+  const [musicPlayerImage, setMusicPlayerImage] = useState<HTMLImageElement | null>(null)
   const [newMessage, setNewMessage] = useState("")
   const [playerName, setPlayerName] = useState("Player")
   const [showNameInput, setShowNameInput] = useState(true)
@@ -179,8 +181,16 @@ export default function PixelCafe() {
             contract.buyCoffee({
               recipient: address, // 给自己买咖啡
               message: `${event.data.playerName} 买了杯咖啡！☕`
+            }).then(() => {
+              
             }).catch(console.error)
           }
+          // 合约调用成功后播放音频
+          console.log("合约调用成功，播放音频")
+          const audio = new Audio('/cafe.wav')
+          audio.volume = 0.5 // 设置音量为50%
+          audio.play().catch(console.error)
+          
           const coffeeNotification: DisplayMessage = {
             id: event.id,
             type: "notification",
@@ -412,25 +422,34 @@ export default function PixelCafe() {
             ctx.fillRect(pixelX + 14, pixelY + 10, 4, 8)
             break
           case 5: // 咖啡机
-            ctx.fillStyle = "#333"
-            ctx.fillRect(pixelX + 4, pixelY + 6, 24, 24)
-            ctx.fillStyle = "#555"
-            ctx.fillRect(pixelX + 6, pixelY + 8, 20, 20)
-            ctx.fillStyle = "#00bfff"
-            ctx.fillRect(pixelX + 14, pixelY + 12, 4, 4) // 蓝光
+            if (coffeeMachineImage) {
+              ctx.drawImage(coffeeMachineImage, pixelX, pixelY, TILE_SIZE * 2, TILE_SIZE * 2)
+            } else {
+              // Fallback drawing for a 2x2 coffee machine
+              ctx.fillStyle = "#333"
+              ctx.fillRect(pixelX, pixelY, TILE_SIZE * 2, TILE_SIZE * 2)
+              ctx.fillStyle = "#555"
+              ctx.fillRect(pixelX + 4, pixelY + 4, TILE_SIZE * 2 - 8, TILE_SIZE * 2 - 8)
+              ctx.fillStyle = "#00bfff"
+              ctx.fillRect(pixelX + 28, pixelY + 24, 8, 8) // 蓝光
+            }
             break
           case 6: // 收音机
-            ctx.fillStyle = "#8B4513"
-            ctx.fillRect(pixelX + 6, pixelY + 10, 20, 16)
-            ctx.fillStyle = "#333"
-            ctx.fillRect(pixelX + 10, pixelY + 14, 12, 8) // 喇叭
-            ctx.fillStyle = "#ccc"
-            ctx.fillRect(pixelX + 22, pixelY + 4, 2, 8) // 天线
+            if (musicPlayerImage) {
+              ctx.drawImage(musicPlayerImage, pixelX, pixelY, TILE_SIZE * 2, TILE_SIZE * 2)
+            } else {
+              ctx.fillStyle = "#8B4513"
+              ctx.fillRect(pixelX, pixelY, TILE_SIZE * 2, TILE_SIZE * 2)
+              ctx.fillStyle = "#333"
+              ctx.fillRect(pixelX + 8, pixelY + 8, TILE_SIZE * 2 - 16, TILE_SIZE * 2 - 16)
+            }
+            break
+          case 7: // 被大物件占用的空位
             break
         }
       }
     }
-  }, [])
+  }, [coffeeMachineImage, musicPlayerImage])
 
   // 渲染游戏
   const render = useCallback(() => {
@@ -453,6 +472,17 @@ export default function PixelCafe() {
     // 绘制特效
     effectsManager.drawEffects(ctx)
   }, [player, otherPlayers, drawMap, drawPlayer, effectsManager])
+
+  // 加载音效和图片
+  useEffect(() => {
+    const coffeeImg = new Image()
+    coffeeImg.src = "/coffeemachine.png"
+    coffeeImg.onload = () => setCoffeeMachineImage(coffeeImg)
+
+    const musicImg = new Image()
+    musicImg.src = "/music.png"
+    musicImg.onload = () => setMusicPlayerImage(musicImg)
+  }, [])
 
   // 键盘控制
   useEffect(() => {
